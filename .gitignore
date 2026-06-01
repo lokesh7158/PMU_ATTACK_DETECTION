@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environment
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Windows
+desktop.ini
+.DS_Store
+
+# Logs
+*.log
+
+# Optional: generated results
+*.jsonl

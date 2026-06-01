@@ -1,0 +1,399 @@
+{
+  "metadata": {
+    "profile_version": "1.0.0",
+    "generated_timestamp": "2026-05-26T10:36:34Z",
+    "trusted_training_window": {
+      "start": 1779703687.29048,
+      "end": 1779703752.723763,
+      "frames": 2572
+    },
+    "fps": 39.307
+  },
+  "detection_thresholds": {
+    "rate_window_seconds": 1.0,
+    "burst_window_seconds": 0.25,
+    "min_rate_samples": 5,
+    "fps_flood_multiplier": 1.75,
+    "fps_slowdown_multiplier": 0.6,
+    "fps_suppression_multiplier": 0.25,
+    "burst_multiplier": 2.5,
+    "bytes_per_second_multiplier": 2.0,
+    "sustained_rate_frames": 3,
+    "missing_frame_threshold": 2,
+    "timestamp_tolerance_ratio": 0.35,
+    "sequence_jump_threshold": 1,
+    "sequence_replay_window": 32,
+    "use_frame_number_sequence": true,
+    "route_latency_multiplier": 3.0,
+    "route_latency_consecutive_frames": 2
+  },
+  "evaluation_thresholds": {
+    "attack_score_threshold": 55.0,
+    "fault_score_threshold": 50.0,
+    "suspicious_score_threshold": 35.0,
+    "persistence_window": 10,
+    "persistence_trigger_count": 4,
+    "aggressive_mode": true,
+    "cyber_weight": 1.4,
+    "fault_weight": 1.1,
+    "replay_weight": 1.5,
+    "timing_weight": 1.3,
+    "sequence_weight": 1.3,
+    "disturbance_weight": 0.9,
+    "persistence_attack_bonus": 14.0,
+    "persistence_fault_bonus": 8.0,
+    "ml_attack_weight": 0.0,
+    "ml_fault_weight": 0.0
+  },
+  "pmu_profiles": {
+    "1": {
+      "identity": {
+        "pmu_id": [
+          "1"
+        ],
+        "stream_ids": [
+          "1"
+        ],
+        "pmu_names": [
+          "IEC61850-PMU"
+        ],
+        "src_ips": [
+          "127.0.0.1"
+        ],
+        "dst_ips": [
+          "127.0.0.1"
+        ],
+        "src_macs": [],
+        "dst_macs": [],
+        "src_ports": [
+          "4712"
+        ],
+        "dst_ports": [
+          "49208"
+        ],
+        "ttls": [
+          "128"
+        ],
+        "packet_sizes": [
+          "120"
+        ],
+        "payload_sizes": [
+          "76"
+        ]
+      },
+      "frequency": {
+        "count": 2572,
+        "mean": 50.0,
+        "std": 0.0,
+        "min": 50.0,
+        "max": 50.0,
+        "p1": 50.0,
+        "p5": 50.0,
+        "p95": 50.0,
+        "p99": 50.0
+      },
+      "dfreq": {
+        "count": 2572,
+        "mean": 0.0,
+        "std": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p1": 0.0,
+        "p5": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "abs_p99": 0.0
+      },
+      "voltage": {
+        "va": {
+          "stats": {
+            "count": 2572,
+            "mean": 107784.0,
+            "std": 0.0,
+            "min": 107784.0,
+            "max": 107784.0,
+            "p1": 107784.0,
+            "p5": 107784.0,
+            "p95": 107784.0,
+            "p99": 107784.0
+          },
+          "base": 107784.0
+        },
+        "vb": {
+          "stats": {
+            "count": 2572,
+            "mean": 107784.0,
+            "std": 0.0,
+            "min": 107784.0,
+            "max": 107784.0,
+            "p1": 107784.0,
+            "p5": 107784.0,
+            "p95": 107784.0,
+            "p99": 107784.0
+          },
+          "base": 107784.0
+        },
+        "vc": {
+          "stats": {
+            "count": 2572,
+            "mean": 107784.0,
+            "std": 0.0,
+            "min": 107784.0,
+            "max": 107784.0,
+            "p1": 107784.0,
+            "p5": 107784.0,
+            "p95": 107784.0,
+            "p99": 107784.0
+          },
+          "base": 107784.0
+        }
+      },
+      "current": {
+        "ia": {
+          "stats": {
+            "count": 2572,
+            "mean": 400.0,
+            "std": 0.0,
+            "min": 400.0,
+            "max": 400.0,
+            "p1": 400.0,
+            "p5": 400.0,
+            "p95": 400.0,
+            "p99": 400.0
+          },
+          "base": 400.0
+        },
+        "ib": {
+          "stats": {
+            "count": 2572,
+            "mean": 400.0,
+            "std": 0.0,
+            "min": 400.0,
+            "max": 400.0,
+            "p1": 400.0,
+            "p5": 400.0,
+            "p95": 400.0,
+            "p99": 400.0
+          },
+          "base": 400.0
+        },
+        "ic": {
+          "stats": {
+            "count": 2572,
+            "mean": 400.0,
+            "std": 0.0,
+            "min": 400.0,
+            "max": 400.0,
+            "p1": 400.0,
+            "p5": 400.0,
+            "p95": 400.0,
+            "p99": 400.0
+          },
+          "base": 400.0
+        }
+      },
+      "network_delay": {
+        "count": 2572,
+        "mean": -2.986003110419907e-10,
+        "std": 4.576441470046537e-10,
+        "min": -1e-09,
+        "max": 0.0,
+        "p1": -1e-09,
+        "p5": -1e-09,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "inter_arrival": {
+        "count": 2520,
+        "mean": 0.33554110716259666,
+        "std": 0.0008113188220556792,
+        "min": 0.32427000999450684,
+        "max": 0.3468019962310791,
+        "p1": 0.3349401378631592,
+        "p5": 0.3354940414428711,
+        "p95": 0.33557820320129395,
+        "p99": 0.3361151385307312
+      },
+      "rate": {
+        "expected_fps": 150.76,
+        "observed_fps": 39.292,
+        "expected_interval_seconds": 0.00663304328918457
+      },
+      "delay_change": {
+        "count": 2571,
+        "mean": 4.006223259432128e-11,
+        "std": 1.9610520164921632e-10,
+        "min": 0.0,
+        "max": 1e-09,
+        "p1": 0.0,
+        "p5": 0.0,
+        "p95": 0.0,
+        "p99": 1e-09
+      },
+      "packet_size": {
+        "count": 2572,
+        "mean": 120.0,
+        "std": 0.0,
+        "min": 120.0,
+        "max": 120.0,
+        "p1": 120.0,
+        "p5": 120.0,
+        "p95": 120.0,
+        "p99": 120.0
+      },
+      "payload_size": {
+        "count": 2572,
+        "mean": 76.0,
+        "std": 0.0,
+        "min": 76.0,
+        "max": 76.0,
+        "p1": 76.0,
+        "p5": 76.0,
+        "p95": 76.0,
+        "p99": 76.0
+      },
+      "angle_diff": {
+        "count": 15426,
+        "mean": 0.0,
+        "std": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p1": 0.0,
+        "p5": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "voltage_imbalance": {
+        "count": 2572,
+        "mean": 0.0,
+        "std": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p1": 0.0,
+        "p5": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "current_imbalance": {
+        "count": 2572,
+        "mean": 0.0,
+        "std": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p1": 0.0,
+        "p5": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "voltage_delta": {
+        "count": 2571,
+        "mean": 0.0,
+        "std": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p1": 0.0,
+        "p5": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "current_delta": {
+        "count": 2571,
+        "mean": 0.0,
+        "std": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p1": 0.0,
+        "p5": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "frequency_delta": {
+        "count": 2571,
+        "mean": 0.0,
+        "std": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p1": 0.0,
+        "p5": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "rocof": {
+        "count": 2572,
+        "mean": 0.0,
+        "std": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p1": 0.0,
+        "p5": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "smoothness": {
+        "count": 7713,
+        "mean": 0.0,
+        "std": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p1": 0.0,
+        "p5": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "phase_angle_diff": {
+        "count": 7716,
+        "mean": 117.2074731985728,
+        "std": 0.9873073189671795,
+        "min": 115.81120979785919,
+        "max": 117.90560495853424,
+        "p1": 115.81120979785919,
+        "p5": 115.81120979785919,
+        "p95": 117.90560495853424,
+        "p99": 117.90560495853424
+      },
+      "physical_consistency": {
+        "voltage_current_voltage_change_ratio": 0.1,
+        "voltage_current_current_response_ratio": 0.02,
+        "angle_symmetry_tolerance_deg": 353.7168148756027,
+        "power_apparent_margin": 1.2,
+        "rocof_frequency_max_error": 0.2,
+        "multi_signal_voltage_change_ratio": 0.1,
+        "multi_signal_current_change_ratio": 0.1,
+        "multi_signal_frequency_change_hz": 0.2,
+        "multi_signal_dfreq_change": 0.2,
+        "multi_signal_angle_change_deg": 20.0,
+        "smooth_voltage_step_ratio": 0.25,
+        "smooth_current_step_ratio": 0.5,
+        "smooth_frequency_step_hz": 1.0,
+        "smooth_angle_step_deg": 60.0,
+        "apparent_power_change_ratio_p99": 0.5,
+        "power_factor_abs_min": 0.4999923243767363,
+        "power_min_apparent": 12934080.0,
+        "active_power_change_abs_p99": 0.0,
+        "reactive_power_change_abs_p99": 0.0
+      },
+      "soc_diff": {
+        "count": 2571,
+        "mean": 0.019836639439906652,
+        "std": 0.13943868607971674,
+        "min": 0.0,
+        "max": 1.0,
+        "p1": 0.0,
+        "p5": 0.0,
+        "p95": 0.0,
+        "p99": 1.0
+      },
+      "fracsec_diff": {
+        "count": 2571,
+        "mean": 655029.4659665499,
+        "std": 2245795.7082221704,
+        "min": 324270.0,
+        "max": 16442107.0,
+        "p1": 334940.7,
+        "p5": 335510.0,
+        "p95": 335612.0,
+        "p99": 16441671.0
+      }
+    }
+  }
+}
