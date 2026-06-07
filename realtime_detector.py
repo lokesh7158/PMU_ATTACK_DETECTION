@@ -1,9 +1,15 @@
 import argparse
+import csv
 import json
 import os
 import threading
 import time
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from typing import Deque, Dict, Optional
+
+import pandas as pd
 
 from packet_reader import capture_live_frames
 from packet_reader.evaluation_engine import EvaluationEngine
@@ -25,6 +31,19 @@ def append_line(path: str, line: str):
         os.makedirs(directory, exist_ok=True)
     with open(path, "a", encoding="utf-8") as output:
         output.write(line + "\n")
+
+
+class RecentFrameWindow:
+    def __init__(self, maxlen: int = 100):
+        self._frames: Deque[pd.DataFrame] = deque(maxlen=maxlen)
+
+    def append(self, row: dict) -> None:
+        self._frames.append(pd.DataFrame([row]))
+
+    def as_dataframe(self) -> pd.DataFrame:
+        if not self._frames:
+            return pd.DataFrame()
+        return pd.concat(list(self._frames), ignore_index=True)
 
 
 def build_alert_message(result: dict) -> str:
@@ -87,6 +106,8 @@ def parse_args():
     parser.add_argument("--ports", nargs="*", type=int, default=[4712], help="TCP ports to capture")
     parser.add_argument("--alert-log", default="data/realtime_alerts.log", help="Path to alert log file")
     parser.add_argument("--result-log", default="data/realtime_results.jsonl", help="Path to JSONL result log")
+    parser.add_argument("--realtime-csv", default="data/realtime_model_input.csv", help="Path to merged realtime CSV output")
+    parser.add_argument("--thresholds", default="packet_reader/thresholds.json", help="Thresholds JSON file path for feature extraction and rules")
     parser.add_argument("--known-pmu-ids", nargs="*", type=int, default=[1, 2, 3, 4], help="List of known PMU IDs")
     parser.add_argument("--known-stream-ids", nargs="*", type=lambda x: int(x, 0), default=[0x4001, 0x4002, 0x4003, 0x4004], help="List of known stream IDs (hex or decimal)")
     parser.add_argument("--health-interval", type=float, default=1.0, help="Seconds between infrastructure health checks")
@@ -97,12 +118,35 @@ def parse_args():
     return parser.parse_args()
 
 
+def _ensure_directory(path: str) -> None:
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+
+
+def _extract_current_features(extractor, history_df: pd.DataFrame) -> pd.Series:
+    if history_df.empty:
+        return pd.Series({col: 0.0 for col in extractor.OUTPUT_COLUMNS})
+    output = extractor.extract_dataframe(history_df)
+    if output.empty:
+        return pd.Series({col: 0.0 for col in extractor.OUTPUT_COLUMNS})
+    return output.iloc[-1].reindex(extractor.OUTPUT_COLUMNS).fillna(0.0)
+
+
 def main():
     args = parse_args()
 
-    engine = FrameRuleEngine()
+    engine = FrameRuleEngine(threshold_file=args.thresholds)
     engine.set_known_pmu_ids(args.known_pmu_ids, args.known_stream_ids)
     evaluator = EvaluationEngine()
+    feature_extractor = None
+    try:
+        from feature_extraction import PMUFeatureExtractor
+        feature_extractor = PMUFeatureExtractor(args.thresholds)
+    except Exception as exc:
+        print(f"Failed to initialize feature extractor: {exc}")
+        raise
+
     health_monitor = StreamHealthMonitor(
         {
             "silence_timeout_seconds": args.silence_timeout,
@@ -114,60 +158,134 @@ def main():
     stop_health = threading.Event()
     health_thread = start_health_watchdog(health_monitor, args, stop_health)
 
-    print("Starting realtime detector")
-    print(f"  alert log: {os.path.abspath(args.alert_log)}")
-    print(f"  result log: {os.path.abspath(args.result_log)}")
+    _ensure_directory(args.realtime_csv)
+    csv_fieldnames = [
+        "frame_num",
+        "pmu_id",
+        "stream_id",
+        "frame_score",
+        "normalized_score",
+        "cyber_score",
+        "fault_score",
+        "disturbance_score",
+        "structural_score",
+        "timing_score",
+        "replay_score",
+        "physics_score",
+        "hard_rule_count",
+        "soft_rule_count",
+        "frames_per_second",
+        "severity",
+        "corrupted",
+        "classification",
+        "confidence",
+        "dominant_reason",
+        "history_size",
+        "rules_triggered",
+    ] + PMUFeatureExtractor.OUTPUT_COLUMNS
 
-    if args.pcap:
-        source_desc = f"PCAP file {args.pcap}"
-    else:
-        source_desc = f"interface {args.interface}"
-    print(f"Capturing from {source_desc} ports={args.ports} backend={args.capture_backend}")
-
+    csv_file = open(args.realtime_csv, "a", newline="", encoding="utf-8")
     try:
-        for frame in capture_live_frames(
-            interface=args.interface,
-            pcap_file=args.pcap,
-            ports=args.ports,
-            health_monitor=health_monitor,
-            backend=args.capture_backend,
-        ):
-            frame_start = time.perf_counter()
-            health_monitor.update_decoded_frame(frame)
-            result = engine.evaluate_frame(frame)
-            evaluation = evaluator.evaluate(frame, result, engine.get_stream_state(frame))
-            result["evaluation"] = evaluation
-            result["rule_severity"] = result["severity"]
-            result["classification"] = evaluation["classification"]
-            result["confidence"] = evaluation["confidence"]
-            result["dominant_reason"] = evaluation["dominant_reason"]
-            result["severity"] = evaluation["severity"]
-            health_monitor.update_parser_lag(time.perf_counter() - frame_start)
-            result["stream_health"] = health_monitor.evaluate_health()
+        writer = csv.DictWriter(csv_file, fieldnames=csv_fieldnames)
+        if csv_file.tell() == 0:
+            writer.writeheader()
 
-            summary = (
-                f"frame={result['frame_num']} "
-                f"pmu={result['details'].get('pmu_id')} "
-                f"score={result['frame_score']} "
-                f"classification={result['classification']} "
-                f"severity={evaluation['severity']} "
-                f"health={result['stream_health']['health_state']} "
-                f"corrupted={result['corrupted']} "
-                f"rules={len(result['rules_triggered'])}"
-            )
-            print(summary)
+        history_window = RecentFrameWindow(maxlen=100)
 
-            write_jsonl(args.result_log, result)
+        print("Starting realtime detector")
+        print(f"  alert log: {os.path.abspath(args.alert_log)}")
+        print(f"  result log: {os.path.abspath(args.result_log)}")
+        print(f"  realtime csv: {os.path.abspath(args.realtime_csv)}")
 
-            if should_alert(result):
-                alert = build_alert_message(result)
-                print("ALERT:", alert)
-                append_line(args.alert_log, alert)
+        if args.pcap:
+            source_desc = f"PCAP file {args.pcap}"
+        else:
+            source_desc = f"interface {args.interface}"
+        print(f"Capturing from {source_desc} ports={args.ports} backend={args.capture_backend}")
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            for frame in capture_live_frames(
+                interface=args.interface,
+                pcap_file=args.pcap,
+                ports=args.ports,
+                health_monitor=health_monitor,
+                backend=args.capture_backend,
+            ):
+                frame_start = time.perf_counter()
+                health_monitor.update_decoded_frame(frame)
+                history_window.append(frame)
+                history_df = history_window.as_dataframe()
+
+                rule_future = executor.submit(engine.evaluate_frame, frame, history_df)
+                feature_future = executor.submit(_extract_current_features, feature_extractor, history_df)
+
+                result = rule_future.result()
+                feature_row = feature_future.result()
+
+                evaluation = evaluator.evaluate(frame, result, engine.get_stream_state(frame))
+                result["evaluation"] = evaluation
+                result["rule_severity"] = result["severity"]
+                result["classification"] = evaluation["classification"]
+                result["confidence"] = evaluation["confidence"]
+                result["dominant_reason"] = evaluation["dominant_reason"]
+                result["severity"] = evaluation["severity"]
+                health_monitor.update_parser_lag(time.perf_counter() - frame_start)
+                result["stream_health"] = health_monitor.evaluate_health()
+
+                summary = (
+                    f"frame={result['frame_num']} "
+                    f"pmu={result['details'].get('pmu_id')} "
+                    f"score={result['frame_score']} "
+                    f"classification={result['classification']} "
+                    f"severity={evaluation['severity']} "
+                    f"health={result['stream_health']['health_state']} "
+                    f"corrupted={result['corrupted']} "
+                    f"rules={len(result['rules_triggered'])}"
+                )
+                print(summary)
+
+                write_jsonl(args.result_log, result)
+
+                if should_alert(result):
+                    alert = build_alert_message(result)
+                    print("ALERT:", alert)
+                    append_line(args.alert_log, alert)
+
+                csv_row = {
+                    "frame_num": result.get("frame_num"),
+                    "pmu_id": result["details"].get("pmu_id"),
+                    "stream_id": result["details"].get("stream_id"),
+                    "frame_score": result.get("frame_score"),
+                    "normalized_score": result.get("normalized_score"),
+                    "cyber_score": result.get("cyber_score"),
+                    "fault_score": result.get("fault_score"),
+                    "disturbance_score": result.get("disturbance_score"),
+                    "structural_score": result.get("category_scores", {}).get("structural", 0.0),
+                    "timing_score": result.get("category_scores", {}).get("timing", 0.0),
+                    "replay_score": result.get("category_scores", {}).get("replay", 0.0),
+                    "physics_score": result.get("category_scores", {}).get("physics", 0.0),
+                    "hard_rule_count": result.get("ml_features", {}).get("hard_rule_count", 0),
+                    "soft_rule_count": result.get("ml_features", {}).get("soft_rule_count", 0),
+                    "frames_per_second": result.get("ml_features", {}).get("frames_per_second", result.get("windowed_stats", {}).get("frames_per_second", 0.0)),
+                    "severity": result.get("severity"),
+                    "corrupted": result.get("corrupted"),
+                    "classification": result.get("classification"),
+                    "confidence": result.get("confidence"),
+                    "dominant_reason": result.get("dominant_reason"),
+                    "history_size": len(history_df),
+                    "rules_triggered": ",".join(result.get("rules_triggered", [])),
+                }
+                csv_row.update({
+                    col: float(feature_row.get(col, 0.0)) for col in PMUFeatureExtractor.OUTPUT_COLUMNS
+                })
+                writer.writerow(csv_row)
+                csv_file.flush()
     finally:
         final_health = health_monitor.evaluate_health()
         write_jsonl(args.result_log, final_health)
         stop_health.set()
         health_thread.join(timeout=2.0)
+        csv_file.close()
 
 
 if __name__ == "__main__":

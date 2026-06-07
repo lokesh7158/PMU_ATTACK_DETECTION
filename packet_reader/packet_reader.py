@@ -136,9 +136,23 @@ def get_pyshark_conn_key(packet):
         return None
 
 
-def extract_scapy_network_info(packet):
+def _packet_capture_epoch(packet):
+    try:
+        return float(packet.time)
+    except Exception:
+        return None
+
+
+def extract_scapy_network_info(packet, frame_number=None):
     """Extract network layer information from scapy packet"""
     info = {}
+
+    if frame_number is not None:
+        info["frame_number"] = frame_number
+
+    frame_time = _packet_capture_epoch(packet)
+    if frame_time is not None:
+        info["frame_time"] = frame_time
     
     # MAC addresses
     if packet.haslayer(Ether):
@@ -291,6 +305,7 @@ def _scapy_packet_to_rows(packet, health_monitor=None):
         return []
 
     capture_stats["packets"] += 1
+    packet_number = capture_stats["packets"]
     if health_monitor is not None:
         health_monitor.update_raw_packet()
 
@@ -300,7 +315,7 @@ def _scapy_packet_to_rows(packet, health_monitor=None):
         return []
 
     capture_stats["payload_packets"] += 1
-    network_info = extract_scapy_network_info(packet)
+    network_info = extract_scapy_network_info(packet, frame_number=packet_number)
 
     key = _buffer_key(conn_key)
     buffers.setdefault(key, bytearray()).extend(payload)
@@ -435,6 +450,7 @@ def handle_packet(packet):
         return
 
     capture_stats["packets"] += 1
+    packet_number = capture_stats["packets"]
     conn_key = get_scapy_conn_key(packet)
     payload = bytes(packet[TCP].payload)
     if not payload:
@@ -442,7 +458,7 @@ def handle_packet(packet):
 
     capture_stats["payload_packets"] += 1
     # Extract network information from packet
-    network_info = extract_scapy_network_info(packet)
+    network_info = extract_scapy_network_info(packet, frame_number=packet_number)
 
     key = _buffer_key(conn_key)
     buffers.setdefault(key, bytearray()).extend(payload)
@@ -557,6 +573,12 @@ def _start_status_reporter():
 
 def start_sniff(interface, count=0, timeout=None):
     print("Starting scapy live capture on", interface)
+    if "loopback" in str(interface).lower():
+        print(
+            "Loopback captures usually do not include Ethernet headers, "
+            "so src_mac and dst_mac may be empty on this adapter.",
+            flush=True,
+        )
     stop_status = _start_status_reporter()
 
     try:

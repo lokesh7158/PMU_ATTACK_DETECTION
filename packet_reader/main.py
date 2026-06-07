@@ -34,7 +34,7 @@ if __name__ == "__main__":
     
     # CSV Output File (same file for all captures - append mode)
     # All data will be written to this single file
-    csv_path = r"C:\Users\lokes\PMU_detection\data\pmu_data_RAW.csv"
+    csv_path = r"C:\Users\lokes\PMU_detection\data\new_data.csv"
     set_csv_file(csv_path)
     print(f"CSV output: {os.path.abspath(csv_path)}")
     print(f"Mode: Append (all captures written to same file)")

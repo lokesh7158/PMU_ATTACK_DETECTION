@@ -7,6 +7,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import pandas as pd
+
 
 class SeverityLevel(Enum):
     NORMAL = "NORMAL"
@@ -353,7 +355,12 @@ class FrameRuleEngine:
         dst_ip = _safe_str(frame.get("dst_ip")) or "unknown"
         return (pmu_id, stream_id, dst_ip)
 
-    def _build_context(self, frame: Dict[str, Any], state: StreamState) -> Dict[str, Any]:
+    def _build_context(
+        self,
+        frame: Dict[str, Any],
+        state: StreamState,
+        history_frames: Optional[pd.DataFrame] = None,
+    ) -> Dict[str, Any]:
         profile = self._get_profile(_safe_str(frame.get("pmu_id")))
         previous_frame = state.last_safe_frame
         previous_ts = state.last_timestamp
@@ -375,6 +382,7 @@ class FrameRuleEngine:
             "previous_timestamp": previous_ts,
             "current_timestamp": current_ts,
             "time_delta": delta,
+            "history_size": len(history_frames) if history_frames is not None else 0,
             "freq_history": list(state.freq_history),
             "voltage_history": list(state.voltage_history),
             "current_history": list(state.current_history),
@@ -1061,7 +1069,7 @@ class FrameRuleEngine:
             stats["avg_fps_window"] = round(sum(state.fps_history) / len(state.fps_history), 3)
         return stats
 
-    def evaluate_frame(self, frame: Dict[str, Any]) -> Dict[str, Any]:
+    def evaluate_frame(self, frame: Dict[str, Any], history_frames: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
         self.frame_count += 1
         ci_frame = CaseInsensitiveFrame(frame)
         normalized = {
@@ -1099,7 +1107,7 @@ class FrameRuleEngine:
 
         stream_key = self._compose_stream_key(normalized)
         state = self.stream_states.setdefault(stream_key, StreamState(key=stream_key))
-        context = self._build_context(normalized, state)
+        context = self._build_context(normalized, state, history_frames)
 
         disturbance = self._compute_disturbance(normalized, state, context.get("profile", {}))
         disturbance_score = disturbance["score"]

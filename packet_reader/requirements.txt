@@ -1,2 +1,4 @@
 scapy
 pyshark
+pandas
+numpy

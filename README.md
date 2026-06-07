@@ -87,6 +87,13 @@ For `data\v3_fixed_sizes.pcap`, use port `8055`:
 python realtime_detector.py --pcap data\v3_fixed_sizes.pcap --capture-backend scapy --ports 8055
 ```
 
+The realtime detector now also supports writing merged rules + feature outputs to CSV for downstream ML input:
+
+```powershell
+python realtime_detector.py --pcap data\c37_pmu1_data_publisher_subscriber.pcapng --capture-backend pyshark --ports 4712 \
+  --realtime-csv data\realtime_model_input.csv
+```
+
 Useful realtime health options:
 
 ```powershell
@@ -111,6 +118,14 @@ Realtime alerts are stored here:
 ```text
 data\realtime_alerts.log
 ```
+
+Merged ML-ready feature outputs from the realtime rules engine and feature extractor are written here by default:
+
+```text
+data\realtime_model_input.csv
+```
+
+Use `--realtime-csv` to change the CSV path and `--thresholds` to point to a custom thresholds JSON.
 
 `realtime_results.jsonl` contains structured JSON lines for:
 
