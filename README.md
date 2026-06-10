@@ -1,75 +1,87 @@
 # PMU Detection IDS
 
-Realtime IEEE C37 PMU intrusion detection system with packet capture, PMU frame decoding, rule-based detection, final evaluation, and stream health monitoring.
+Realtime and offline intrusion/fault detection for IEEE C37.118 PMU streams.
+
+The project decodes PMU traffic, extracts cyber and physical features, applies
+rule-based detection, performs final attack/fault/recovery evaluation, monitors
+stream health, and can produce ML-ready CSV rows.
+
+## What This Repo Does
+
+- Decode IEEE C37.118.2 CONFIG and DATA frames from PCAP files or live traffic.
+- Preserve PMU measurements plus network metadata such as IP, TCP, packet size,
+  payload size, timestamps, and CRC status.
+- Run rule-based detection for replay, timing, sequence, identity, malformed
+  data, suppression, flooding, abnormal phasor/frequency behavior, and physical
+  fault conditions.
+- Classify frames as `NORMAL`, `FAULT`, `RECOVERING`, `SUSPICIOUS`, or attack
+  states through the final evaluation layer.
+- Monitor infrastructure health when decoded frames slow down or stop.
+- Generate compact rule summaries, full inspection CSVs, and concatenated
+  feature-plus-rule CSVs for downstream ML.
 
 ## Project Layout
 
 ```text
 PMU_detection/
-  realtime_detector.py              Main realtime IDS runner
+  realtime_detector.py              Realtime IDS runner
   baseline_profiler.py              Root launcher for threshold generation
+  feature_extraction.py             ML-oriented PMU feature extractor
+  generate_concatenated_features.py Offline feature + rule CSV generator
+  generate_rules_inspection_csv.py  Original CSV + appended rule outputs
   stream_health_monitor.py          Infrastructure health monitor
-  data/                             PCAP files, CSV files, realtime logs
+  test_rules_new_data.py            Offline CSV rule/evaluation runner
+  data/                             PCAP files, CSV files, output logs
+  detection/
+    rules.py                        Active FrameRuleEngine detection rules
+    evaluation_engine.py            Final attack/fault/recovery classifier
+  feature_engineering/
+    feature_concatenator.py         Combines engineered features and rule scores
   packet_reader/
     packet_reader.py                PyShark/Scapy capture and frame extraction
-    decoder.py                      IEEE C37 frame decoding
-    rules.py                        FrameRuleEngine detection rules
-    evaluation_engine.py            Final attack/fault classification layer
-    baseline_profiler.py            Real threshold profiler implementation
-    thresholds.json                 Active detection/evaluation thresholds
+    decoder.py                      Frame routing and CSV output
+    c37_decoder.py                  IEEE C37 frame parsing
+    baseline_profiler.py            Threshold profiler implementation
+    thresholds.json                 Active thresholds
+    main.py                         Configurable raw capture/CSV script
 ```
 
-## Install Requirements
+## Requirements
 
 Run from the project root:
 
 ```powershell
 cd C:\Users\lokes\PMU_detection
-python -m pip install pandas scapy pyshark
+python -m pip install -r packet_reader\requirements.txt
 ```
 
-For PyShark, install Wireshark/TShark.
+PyShark requires Wireshark/TShark. Scapy live capture on Windows usually
+requires Npcap, and may require an Administrator terminal depending on the
+interface.
 
-For Scapy live capture on Windows, install Npcap and run the terminal as Administrator if needed.
+## Main Data Flow
 
-## Capture Modes
-
-The realtime detector supports two packet capture backends:
-
-```powershell
---capture-backend pyshark
---capture-backend scapy
+```text
+PCAP or live interface
+  -> packet_reader capture backend
+  -> C37 frame extraction and decoding
+  -> FrameRuleEngine rules
+  -> EvaluationEngine final classification
+  -> JSONL logs, alert logs, inspection CSVs, or ML-ready CSVs
 ```
 
-PyShark is the default, so this:
+For raw decoding without IDS evaluation, use `packet_reader\main.py`. For IDS
+evaluation and health monitoring, use `realtime_detector.py`.
+
+## Realtime IDS
+
+Use PyShark, the default backend:
 
 ```powershell
 python realtime_detector.py --interface "Ethernet" --ports 4712
 ```
 
-is the same as:
-
-```powershell
-python realtime_detector.py --interface "Ethernet" --capture-backend pyshark --ports 4712
-```
-
-Use Scapy like this:
-
-```powershell
-python realtime_detector.py --interface "Ethernet" --capture-backend scapy --ports 4712
-```
-
-Only change `--capture-backend` when switching between PyShark and Scapy.
-
-## Run Realtime Detection
-
-Live capture with PyShark:
-
-```powershell
-python realtime_detector.py --interface "Ethernet" --capture-backend pyshark --ports 4712
-```
-
-Live capture with Scapy:
+Use Scapy:
 
 ```powershell
 python realtime_detector.py --interface "Ethernet" --capture-backend scapy --ports 4712
@@ -81,20 +93,7 @@ Read from a PCAP file:
 python realtime_detector.py --pcap data\c37_pmu1_data_publisher_subscriber.pcapng --capture-backend pyshark --ports 4712
 ```
 
-For `data\v3_fixed_sizes.pcap`, use port `8055`:
-
-```powershell
-python realtime_detector.py --pcap data\v3_fixed_sizes.pcap --capture-backend scapy --ports 8055
-```
-
-The realtime detector now also supports writing merged rules + feature outputs to CSV for downstream ML input:
-
-```powershell
-python realtime_detector.py --pcap data\c37_pmu1_data_publisher_subscriber.pcapng --capture-backend pyshark --ports 4712 \
-  --realtime-csv data\realtime_model_input.csv
-```
-
-Useful realtime health options:
+Useful health-monitor options:
 
 ```powershell
 python realtime_detector.py --interface "Ethernet" --capture-backend scapy --ports 4712 `
@@ -105,172 +104,200 @@ python realtime_detector.py --interface "Ethernet" --capture-backend scapy --por
   --raw-flood-rate 1000
 ```
 
-## Realtime Output Logs
-
-By default, realtime results are stored here:
+Default realtime outputs:
 
 ```text
 data\realtime_results.jsonl
-```
-
-Realtime alerts are stored here:
-
-```text
 data\realtime_alerts.log
-```
-
-Merged ML-ready feature outputs from the realtime rules engine and feature extractor are written here by default:
-
-```text
 data\realtime_model_input.csv
 ```
 
-Use `--realtime-csv` to change the CSV path and `--thresholds` to point to a custom thresholds JSON.
+`realtime_results.jsonl` stores per-frame rule results, final classifications,
+confidence, triggered rules, and health snapshots. `realtime_alerts.log` stores
+human-readable high-severity, attack, corruption, and stream-health alerts.
+`realtime_model_input.csv` stores concatenated engineered features and rule
+scores for downstream models.
 
-`realtime_results.jsonl` contains structured JSON lines for:
-
-- decoded frame rule/evaluation results
-- stream health snapshots
-- classifications
-- confidence values
-- triggered rules
-- infrastructure health state
-
-`realtime_alerts.log` contains readable alert messages for:
-
-- attack classifications
-- critical/high severity detections
-- stream health alerts
-- DoS/silence/starvation/flooding conditions
-
-Custom log paths:
+Custom output paths:
 
 ```powershell
-python realtime_detector.py --pcap data\v3_fixed_sizes.pcap --capture-backend scapy --ports 8055 `
+python realtime_detector.py --pcap data\c37_pmu1_data_publisher_subscriber.pcapng --ports 4712 `
   --result-log data\my_results.jsonl `
-  --alert-log data\my_alerts.log
+  --alert-log data\my_alerts.log `
+  --realtime-csv data\my_model_input.csv
 ```
 
-## Generate Thresholds
+## Thresholds
 
-Use normal/clean decoded PMU CSV data to generate thresholds:
-
-```powershell
-python baseline_profiler.py data\pmu_data.csv
-```
-
-This writes by default to:
-
-```text
-packet_reader\thresholds.json
-```
-
-You can also run the implementation module directly:
-
-```powershell
-python -m packet_reader.baseline_profiler data\pmu_data.csv
-```
-
-Or specify the output path:
+Generate thresholds from clean decoded PMU CSV data:
 
 ```powershell
 python baseline_profiler.py data\pmu_data.csv --output packet_reader\thresholds.json
 ```
 
-The IDS loads thresholds from `packet_reader\thresholds.json` automatically.
+The detector and feature extractor load `packet_reader\thresholds.json` by
+default. Use `--thresholds` on the scripts below to point at a different file.
 
-## Run Individual Files
+## Offline Rule Evaluation
 
-Root baseline profiler launcher:
-
-```powershell
-python baseline_profiler.py data\pmu_data.csv
-```
-
-Packet-reader baseline profiler:
+Run the active rules and final evaluator over a decoded CSV:
 
 ```powershell
-python -m packet_reader.baseline_profiler data\pmu_data.csv
+python test_rules_new_data.py pmu_data_10min_replaced_labeled.csv
 ```
 
-Realtime detector:
+Default outputs:
+
+```text
+data\<input_stem>_rules_output.jsonl
+data\<input_stem>_rules_summary.csv
+```
+
+Choose explicit output paths:
 
 ```powershell
-python realtime_detector.py --pcap data\v3_fixed_sizes.pcap --capture-backend scapy --ports 8055
+python test_rules_new_data.py pmu_data_10min_replaced_labeled.csv `
+  --csv-summary data\pmu_data_10min_replaced_labeled_recovery_rules_summary.csv `
+  --jsonl-output data\pmu_data_10min_replaced_labeled_recovery_rules_output.jsonl
 ```
 
-Rules demo/self-test:
+The summary CSV includes frame identity, scores, rule severity, final
+classification, final severity, confidence, corruption status, triggered rules,
+and dominant reason.
+
+## Full Inspection CSV
+
+Use this when you want every original input column plus appended rule/evaluation
+fields:
 
 ```powershell
-python -m packet_reader.rules
+python generate_rules_inspection_csv.py pmu_data_10min_replaced_labeled.csv
 ```
 
-Evaluation engine:
+Default output:
+
+```text
+data\pmu_data_10min_replaced_labeled_rules_inspection.csv
+```
+
+Custom output:
 
 ```powershell
-python packet_reader\evaluation_engine.py
+python generate_rules_inspection_csv.py pmu_data_10min_replaced_labeled.csv `
+  --output data\pmu_data_10min_replaced_labeled_recovery_rules_inspection.csv
 ```
 
-`evaluation_engine.py` is mainly a library used by `realtime_detector.py`; running it directly does not start the IDS.
+Appended fields include `rules_classification`, `rules_confidence`,
+`rules_triggered`, `rules_frame_score`, `rules_cyber_score`,
+`rules_fault_score`, `rules_disturbance_score`, `rules_physics_score`,
+`rules_weighted_attack_score`, `rules_weighted_fault_score`,
+`rules_persistent_fault`, `rules_recovery_count`, and
+`rules_dominant_reason`.
 
-Stream health monitor:
+## ML Feature CSV
+
+Generate a model-ready CSV containing engineered PMU features plus selected rule
+scores:
 
 ```powershell
-python stream_health_monitor.py
+python generate_concatenated_features.py pmu_data_10min_replaced_labeled.csv `
+  --output data\pmu_data_10min_concatenated_features.csv
 ```
 
-`stream_health_monitor.py` is mainly a library used by `realtime_detector.py`; it exposes APIs such as `update_raw_packet()`, `update_decoded_frame()`, `update_decode_failure()`, and `evaluate_health()`.
+The output combines columns from `PMUFeatureExtractor.OUTPUT_COLUMNS` with rule
+summary fields such as `frame_score`, `normalized_score`, `fault_score`,
+`cyber_score`, `disturbance_score`, `structural_score`, `timing_score`,
+`replay_score`, `physics_score`, `hard_rule_count`, `soft_rule_count`, and
+`frames_per_second`.
 
-## What the System Detects
+## Raw Packet Decoding
 
-The IDS can detect PMU/protocol-level problems such as:
+For raw C37 decoding to CSV, edit `packet_reader\main.py` to choose the CSV path
+and capture source, then run:
 
-- replay attacks
-- timing anomalies
-- sequence anomalies
-- malformed/corrupted PMU data
-- PMU identity anomalies
-- suppression symptoms
-- flooding symptoms
-- abnormal frequency/phasor behavior
+```powershell
+python packet_reader\main.py
+```
 
-The stream health monitor adds infrastructure-level detection for:
+The raw decoder captures PMU measurements and network metadata. See
+`packet_reader\README.md` for the detailed decoder pipeline and field list.
 
-- complete stream silence
-- DoS or stream disappearance
-- subscriber starvation
-- parser overload
-- decode failure spikes
-- packet flooding where decoding collapses
-- capture queue backlog
-- degraded stream health
+## Current Detector Status
 
-This is important because normal rule detection only runs when decoded PMU frames arrive. The health monitor keeps checking the stream even when frames stop arriving or decoding becomes unreliable.
+Current validation on `pmu_data_10min_replaced_labeled.csv`:
+
+```text
+Labels: 4399 normal, 900 fault
+
+TP: 900
+FP: 6
+FN: 0
+TN: 4393
+
+Precision: 0.9934
+Recall:    1.0000
+F1:        0.9967
+```
+
+Final class counts from the latest recovery run:
+
+```text
+NORMAL:     4248
+FAULT:       906
+RECOVERING:  135
+SUSPICIOUS:   10
+```
+
+`RECOVERING` frames are not counted as `FAULT` in the binary metrics. They make
+post-fault clearing explainable without keeping the detector in the `FAULT`
+state.
 
 ## Typical Workflow
 
-1. Generate thresholds from clean data:
+1. Generate or refresh thresholds from clean data:
 
 ```powershell
 python baseline_profiler.py data\pmu_data.csv --output packet_reader\thresholds.json
 ```
 
-2. Run realtime IDS with your preferred capture backend:
+2. Validate rules offline:
+
+```powershell
+python test_rules_new_data.py pmu_data_10min_replaced_labeled.csv
+```
+
+3. Generate inspection or ML-ready CSVs:
+
+```powershell
+python generate_rules_inspection_csv.py pmu_data_10min_replaced_labeled.csv
+python generate_concatenated_features.py pmu_data_10min_replaced_labeled.csv
+```
+
+4. Run realtime detection:
 
 ```powershell
 python realtime_detector.py --interface "Ethernet" --capture-backend pyshark --ports 4712
 ```
 
-or:
-
-```powershell
-python realtime_detector.py --interface "Ethernet" --capture-backend scapy --ports 4712
-```
-
-3. Check results:
+5. Review outputs:
 
 ```text
 data\realtime_results.jsonl
 data\realtime_alerts.log
+data\realtime_model_input.csv
 ```
 
+## Troubleshooting
+
+- `DATA frame without prior config`: capture must include the CONFIG frame before
+  DATA frames can be decoded.
+- PyShark cannot start: confirm Wireshark/TShark is installed and available on
+  `PATH`.
+- Scapy sees no live packets: confirm the interface name and install Npcap on
+  Windows.
+- Realtime health alerts but no rule alerts: the stream may be silent, flooded,
+  or failing decode before frames reach the rule engine.
+- Missing or unusual feature values: regenerate thresholds from representative
+  clean data and confirm the input CSV has expected PMU columns such as
+  `pmu_id`, `freq1`, `dfreq1`, phasor magnitudes/angles, timing, and packet
+  sizes.

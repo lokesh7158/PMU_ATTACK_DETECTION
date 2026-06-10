@@ -10,7 +10,7 @@ import json
 import math
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     import pandas as pd
@@ -41,6 +41,20 @@ def simple_stats(series):
         "p5": float(series.quantile(0.05)),
         "p95": float(series.quantile(0.95)),
         "p99": float(series.quantile(0.99)),
+    }
+
+
+def envelope_stats(series, std_multiplier: float = 3.0):
+    stats = simple_stats(series)
+    if not stats:
+        return {}
+    lower = max(float(stats["mean"]) - std_multiplier * float(stats["std"]), 0.0)
+    upper = float(stats["mean"]) + std_multiplier * float(stats["std"])
+    return {
+        **stats,
+        "lower_bound": lower,
+        "upper_bound": upper,
+        "std_multiplier": std_multiplier,
     }
 
 
@@ -102,6 +116,38 @@ def compute_timestamp(df):
         return None
     time_base = df.get("time_base", pd.Series(1_000_000, index=df.index))
     return df["soc"].astype(float) + df["fracsec"].astype(float) / pd.to_numeric(time_base, errors="coerce").replace(0, 1)
+
+
+def _numeric_time_series(df, column: str) -> pd.Series:
+    if column not in df.columns:
+        return pd.Series(dtype=float)
+    return pd.to_numeric(df[column], errors="coerce").dropna()
+
+
+def arrival_timestamp(df) -> Tuple[Optional[pd.Series], str]:
+    """Return the best clock for arrival-rate profiling.
+
+    `frame_time` is the packet timestamp captured by PyShark/Scapy and preserves
+    the PMU reporting cadence in offline CSVs. `capture_time` is a close fallback.
+    Protocol `soc/fracsec` is kept for protocol-timestamp checks, but some C37
+    sources encode FRACSEC in a way that does not reflect packet reporting rate.
+    """
+    candidates = [
+        ("frame_time", _numeric_time_series(df, "frame_time")),
+        ("capture_time", _numeric_time_series(df, "capture_time")),
+    ]
+    for name, series in candidates:
+        if len(series) < 2:
+            continue
+        diffs = series.sort_index().diff().dropna()
+        positive = diffs[diffs > 0]
+        if len(positive) >= max(2, int(len(series) * 0.5)):
+            return series, name
+
+    protocol_ts = compute_timestamp(df)
+    if protocol_ts is None:
+        return None, "none"
+    return protocol_ts.dropna(), "soc_fracsec"
 
 
 def profile_frequency(df):
@@ -258,9 +304,9 @@ def profile_imbalance(df, prefix):
 
 
 def profile_timing(df):
-    if df.empty or "soc" not in df.columns or "fracsec" not in df.columns:
+    if df.empty:
         return {}
-    ts = compute_timestamp(df)
+    ts, source = arrival_timestamp(df)
     if ts is None:
         return {}
     interval = ts.diff().dropna()
@@ -268,15 +314,16 @@ def profile_timing(df):
     interval = interval[interval < 1]
     if interval.empty:
         return {}
-    stats = simple_stats(interval)
+    stats = envelope_stats(interval)
+    stats["source"] = source
     return stats
 
 
 def profile_rate(df):
-    ts = compute_timestamp(df)
+    ts, source = arrival_timestamp(df)
     if ts is None:
         return {}
-    valid = ts.dropna().sort_values()
+    valid = ts.dropna()
     if len(valid) < 2:
         return {}
     intervals = valid.diff().dropna()
@@ -286,10 +333,12 @@ def profile_rate(df):
     median_interval = float(intervals.median())
     span = float(valid.iloc[-1] - valid.iloc[0])
     expected_fps = 1.0 / median_interval if median_interval > 0 else (len(valid) / span if span > 0 else 0.0)
+    observed_fps = (len(valid) - 1) / span if span > 0 else expected_fps
     return {
         "expected_fps": round(expected_fps, 3),
-        "observed_fps": round((len(valid) - 1) / span, 3) if span > 0 else round(expected_fps, 3),
+        "observed_fps": round(observed_fps, 3),
         "expected_interval_seconds": median_interval,
+        "source": source,
     }
 
 
@@ -306,6 +355,25 @@ def profile_delay_change(df):
     values = pd.to_numeric(df["network_delay"], errors="coerce").dropna()
     changes = values.diff().abs().dropna()
     return simple_stats(changes)
+
+
+def profile_sequence(df):
+    result = {}
+    for name in ("frame_number", "sequence_number", "tcp_seq"):
+        if name not in df.columns:
+            continue
+        values = pd.to_numeric(df[name], errors="coerce").dropna()
+        if len(values) < 2:
+            continue
+        diffs = values.diff().dropna()
+        positive = diffs[diffs > 0]
+        if positive.empty:
+            continue
+        rounded = positive.round().astype(int)
+        mode = int(rounded.mode().iloc[0]) if not rounded.mode().empty else int(round(float(positive.median())))
+        stats = envelope_stats(positive)
+        result[f"{name}_step"] = {**stats, "mode": mode}
+    return result
 
 
 def profile_packet_sizes(df):
@@ -520,7 +588,7 @@ def build_thresholds(df):
         "generated_timestamp": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
     }
 
-    ts = compute_timestamp(df)
+    ts, rate_source = arrival_timestamp(df)
     if ts is not None and not ts.dropna().empty:
         ts_clean = ts.dropna()
         start = float(ts_clean.min())
@@ -529,9 +597,10 @@ def build_thresholds(df):
             "start": start,
             "end": end,
             "frames": int(len(ts_clean)),
+            "rate_source": rate_source,
         }
         span = float(end - start)
-        metadata["fps"] = round(len(ts_clean) / span, 3) if span > 0 else 0.0
+        metadata["fps"] = round((len(ts_clean) - 1) / span, 3) if span > 0 and len(ts_clean) > 1 else 0.0
     else:
         metadata["trusted_training_window"] = {"frames": int(len(df))}
         metadata["fps"] = 0.0
@@ -549,6 +618,7 @@ def build_thresholds(df):
         profile["inter_arrival"] = profile_timing(group)
         profile["rate"] = profile_rate(group)
         profile["delay_change"] = profile_delay_change(group)
+        profile["sequence"] = profile_sequence(group)
         profile["packet_size"] = simple_stats(pd.to_numeric(group["packet_size"], errors="coerce").dropna()) if "packet_size" in group.columns else {}
         profile["payload_size"] = simple_stats(pd.to_numeric(group["payload_size"], errors="coerce").dropna()) if "payload_size" in group.columns else {}
         profile["angle_diff"] = profile_angle_diff(group)
@@ -562,6 +632,9 @@ def build_thresholds(df):
         profile["phase_angle_diff"] = profile_phase_angle_stability(group)
         profile["physical_consistency"] = profile_physical_consistency(group)
         profile.update(profile_soc_fracsec(group))
+        warnings = validate_profile(profile)
+        if warnings:
+            profile["profile_warnings"] = warnings
         profiles[str(int(pmu_id))] = profile
 
     detection_thresholds = {
@@ -581,6 +654,9 @@ def build_thresholds(df):
         "use_frame_number_sequence": True,
         "route_latency_multiplier": 3.0,
         "route_latency_consecutive_frames": 2,
+        "enable_route_latency_rules": False,
+        "inter_arrival_consecutive_frames": 3,
+        "silence_timeout_multiplier": 5.0,
     }
     evaluation_thresholds = {
         "attack_score_threshold": 55.0,
@@ -606,6 +682,32 @@ def build_thresholds(df):
         "evaluation_thresholds": evaluation_thresholds,
         "pmu_profiles": profiles,
     }
+
+
+def validate_profile(profile: Dict[str, Any]) -> List[str]:
+    warnings = []
+    rate = profile.get("rate", {})
+    inter_arrival = profile.get("inter_arrival", {})
+    expected_fps = rate.get("expected_fps")
+    observed_fps = rate.get("observed_fps")
+    expected_interval = rate.get("expected_interval_seconds")
+
+    if expected_fps and expected_interval:
+        implied = 1.0 / float(expected_interval)
+        if abs(float(expected_fps) - implied) > max(0.5, float(expected_fps) * 0.02):
+            warnings.append(f"expected_fps {expected_fps} does not match expected_interval_seconds {expected_interval}")
+
+    if expected_fps and observed_fps:
+        delta = abs(float(expected_fps) - float(observed_fps))
+        if delta > max(1.0, float(expected_fps) * 0.05):
+            warnings.append(f"expected_fps {expected_fps} differs from observed_fps {observed_fps}")
+
+    if expected_interval and inter_arrival.get("mean"):
+        delta = abs(float(expected_interval) - float(inter_arrival["mean"]))
+        if delta > max(0.002, float(expected_interval) * 0.10):
+            warnings.append("inter_arrival mean does not match expected_interval_seconds")
+
+    return warnings
 
 
 def save_thresholds(thresholds: Dict[str, Any], path: Path):

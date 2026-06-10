@@ -11,9 +11,10 @@ from typing import Deque, Dict, Optional
 
 import pandas as pd
 
+from detection.evaluation_engine import EvaluationEngine
+from detection.rules import FrameRuleEngine
+from feature_engineering import FeatureConcatenator
 from packet_reader import capture_live_frames
-from packet_reader.evaluation_engine import EvaluationEngine
-from packet_reader.rules import FrameRuleEngine
 from stream_health_monitor import StreamHealthMonitor
 
 
@@ -159,34 +160,11 @@ def main():
     health_thread = start_health_watchdog(health_monitor, args, stop_health)
 
     _ensure_directory(args.realtime_csv)
-    csv_fieldnames = [
-        "frame_num",
-        "pmu_id",
-        "stream_id",
-        "frame_score",
-        "normalized_score",
-        "cyber_score",
-        "fault_score",
-        "disturbance_score",
-        "structural_score",
-        "timing_score",
-        "replay_score",
-        "physics_score",
-        "hard_rule_count",
-        "soft_rule_count",
-        "frames_per_second",
-        "severity",
-        "corrupted",
-        "classification",
-        "confidence",
-        "dominant_reason",
-        "history_size",
-        "rules_triggered",
-    ] + PMUFeatureExtractor.OUTPUT_COLUMNS
+    concatenator = FeatureConcatenator(PMUFeatureExtractor.OUTPUT_COLUMNS)
 
     csv_file = open(args.realtime_csv, "a", newline="", encoding="utf-8")
     try:
-        writer = csv.DictWriter(csv_file, fieldnames=csv_fieldnames)
+        writer = csv.DictWriter(csv_file, fieldnames=concatenator.output_columns)
         if csv_file.tell() == 0:
             writer.writeheader()
 
@@ -251,33 +229,7 @@ def main():
                     print("ALERT:", alert)
                     append_line(args.alert_log, alert)
 
-                csv_row = {
-                    "frame_num": result.get("frame_num"),
-                    "pmu_id": result["details"].get("pmu_id"),
-                    "stream_id": result["details"].get("stream_id"),
-                    "frame_score": result.get("frame_score"),
-                    "normalized_score": result.get("normalized_score"),
-                    "cyber_score": result.get("cyber_score"),
-                    "fault_score": result.get("fault_score"),
-                    "disturbance_score": result.get("disturbance_score"),
-                    "structural_score": result.get("category_scores", {}).get("structural", 0.0),
-                    "timing_score": result.get("category_scores", {}).get("timing", 0.0),
-                    "replay_score": result.get("category_scores", {}).get("replay", 0.0),
-                    "physics_score": result.get("category_scores", {}).get("physics", 0.0),
-                    "hard_rule_count": result.get("ml_features", {}).get("hard_rule_count", 0),
-                    "soft_rule_count": result.get("ml_features", {}).get("soft_rule_count", 0),
-                    "frames_per_second": result.get("ml_features", {}).get("frames_per_second", result.get("windowed_stats", {}).get("frames_per_second", 0.0)),
-                    "severity": result.get("severity"),
-                    "corrupted": result.get("corrupted"),
-                    "classification": result.get("classification"),
-                    "confidence": result.get("confidence"),
-                    "dominant_reason": result.get("dominant_reason"),
-                    "history_size": len(history_df),
-                    "rules_triggered": ",".join(result.get("rules_triggered", [])),
-                }
-                csv_row.update({
-                    col: float(feature_row.get(col, 0.0)) for col in PMUFeatureExtractor.OUTPUT_COLUMNS
-                })
+                csv_row = concatenator.concatenate(feature_row, result)
                 writer.writerow(csv_row)
                 csv_file.flush()
     finally:
